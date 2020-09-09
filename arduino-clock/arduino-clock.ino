@@ -36,7 +36,7 @@
 #define SECOND_CORRECTION_MINUTES   110
 #define DEBOUNCE_DELAY              50
 
-#define MENU_TIMEOUT                10
+#define MENU_TIMEOUT                7
 
 #define HARDWARE_TYPE               MD_MAX72XX::PAROLA_HW
 
@@ -149,9 +149,25 @@ void setup()
 
     mx.begin();
 
-    printHours(hours);
-    printMinutes(minutes);
-    printSeconds(seconds);
+    printHours(hours, false);
+    printMinutes(minutes, false);
+    printSeconds(seconds, false);
+}
+
+/*
+ *      Interrupt initialization
+ */
+void initInterrupt()
+{
+    noInterrupts();     /* Disable all interrupts */
+    TCCR1A = 0x00;
+    TCCR1B = 0x00;
+    TCNT1 = 0x0000;     /* Preload timer */
+    TCCR1A = 0xA2;      /* fast 16 bit PWM */
+    TCCR1B = 0x1c;      /* 256 Prescaler */
+    ICR1 = 62500-1;
+    TIMSK1 |= 0x01;     /* Enable timer overflow interrupt */
+    interrupts();       /* Enable all interrupts */
 }
 
 /*
@@ -200,17 +216,17 @@ void mainStateMachine()
             if (seconds != prevSeconds || forceUpdate)
             {
                 prevSeconds = seconds;
-                printSeconds(seconds);
+                printSeconds(seconds, false);
             }
             if (minutes != prevMinutes || forceUpdate)
             {
                 prevMinutes = minutes;
-                printMinutes(minutes);
+                printMinutes(minutes, false);
             }
             if (hours != prevHours || forceUpdate)
             {
                 prevHours = hours;
-                printHours(hours);
+                printHours(hours, false);
             }
 
             if (toggle)
@@ -251,9 +267,9 @@ void mainStateMachine()
                         visualMinutes = minutes;
                         visualSeconds = seconds;
                         mx.clear();
-                        printHours(visualHours);
-                        printMinutes(visualMinutes);
-                        printSeconds(visualSeconds);
+                        printTime(visualHours, visualMinutes, visualSeconds);
+                        printHours(visualHours, true);
+                        mx.setColumn(4, 0x80);
                     }
                     break;
 
@@ -262,12 +278,16 @@ void mainStateMachine()
                     {
                         modeButtonClicked = false;
                         visualHours = (visualHours + 1) % 24;
-                        printHours(visualHours);
+                        printHours(visualHours, true);
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
                         timeState = SET_MINUTES;
+                        mx.clear();
+                        printTime(visualHours, visualMinutes, visualSeconds);
+                        printMinutes(visualMinutes, true);
+                        mx.setColumn(16, 0x80);
                     }
                     break;
 
@@ -276,12 +296,16 @@ void mainStateMachine()
                     {
                         modeButtonClicked = false;
                         visualMinutes = (visualMinutes + 1) % 60;
-                        printMinutes(visualMinutes);
+                        printMinutes(visualMinutes, true);
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
                         timeState = SET_SECONDS;
+                        mx.clear();
+                        printTime(visualHours, visualMinutes, visualSeconds);
+                        printSeconds(visualSeconds, true);
+                        mx.setColumn(27, 0x40);
                     }
                     break;
 
@@ -290,12 +314,14 @@ void mainStateMachine()
                     {
                         modeButtonClicked = false;
                         visualSeconds = (visualSeconds + 1) % 60;
-                        printSeconds(visualSeconds);
+                        printSeconds(visualSeconds, true);
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
                         timeState = ACCEPT;
+                        mx.clear();
+                        printTime(visualHours, visualMinutes, visualSeconds);
                     }
                     break;
 
@@ -344,9 +370,9 @@ void mainStateMachine()
                         visualMinutes = minutes;
                         visualSeconds = seconds;
                         mx.clear();
-                        printHours(visualHours);
-                        printMinutes(visualMinutes);
-                        printSeconds(visualSeconds);
+                        printTime(visualHours, visualMinutes, visualSeconds);
+                        printHours(visualHours, true);
+                        mx.setColumn(4, 0x80);
                     }
                     break;
 
@@ -355,12 +381,16 @@ void mainStateMachine()
                     {
                         modeButtonClicked = false;
                         visualHours = (visualHours + 1) % 24;
-                        printHours(visualHours);
+                        printHours(visualHours, true);
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
                         alarmState = SET_MINUTES;
+                        mx.clear();
+                        printTime(visualHours, visualMinutes, visualSeconds);
+                        printMinutes(visualMinutes, true);
+                        mx.setColumn(16, 0x80);
                     }
                     break;
 
@@ -369,12 +399,16 @@ void mainStateMachine()
                     {
                         modeButtonClicked = false;
                         visualMinutes = (visualMinutes + 1) % 60;
-                        printMinutes(visualMinutes);
+                        printMinutes(visualMinutes, true);
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
                         alarmState = SET_SECONDS;
+                        mx.clear();
+                        printTime(visualHours, visualMinutes, visualSeconds);
+                        printSeconds(visualSeconds, true);
+                        mx.setColumn(27, 0x40);
                     }
                     break;
 
@@ -383,12 +417,14 @@ void mainStateMachine()
                     {
                         modeButtonClicked = false;
                         visualSeconds = (visualSeconds + 1) % 60;
-                        printSeconds(visualSeconds);
+                        printSeconds(visualSeconds, true);
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
                         alarmState = ACCEPT;
+                        mx.clear();
+                        printTime(visualHours, visualMinutes, visualSeconds);
                     }
                     break;
 
@@ -621,38 +657,42 @@ ISR(TIMER1_OVF_vect)
 }
 
 /*
- *      Interrupt initialization
- */
-void initInterrupt()
-{
-    noInterrupts();     /* Disable all interrupts */
-    TCCR1A = 0x00;
-    TCCR1B = 0x00;
-    TCNT1 = 0x0000;     /* Preload timer */
-    TCCR1A = 0xA2;      /* fast 16 bit PWM */
-    TCCR1B = 0x1c;      /* 256 Prescaler */
-    ICR1 = 62500-1;
-    TIMSK1 |= 0x01;     /* Enable timer overflow interrupt */
-    interrupts();       /* Enable all interrupts */
-}
-
-/*
  *      Print a number on the display
  */
-void printNumber(uint8_t startPos, uint8_t number, numberSize numSize)
+void printNumber(uint8_t startPos, uint8_t number, numberSize numSize, bool underscore)
 {
     switch (numSize)
     {
         case SMALL:
-            mx.setColumn(startPos, numbers_small[number][0]);
-            mx.setColumn(startPos+1, numbers_small[number][1]);
-            mx.setColumn(startPos+2, numbers_small[number][2]);
+            if (underscore)
+            {
+                mx.setColumn(startPos, numbers_small[number][0] | 0x40);
+                mx.setColumn(startPos+1, numbers_small[number][1] | 0x40);
+                mx.setColumn(startPos+2, numbers_small[number][2] | 0x40);
+            }
+            else
+            {
+                mx.setColumn(startPos, numbers_small[number][0]);
+                mx.setColumn(startPos+1, numbers_small[number][1]);
+                mx.setColumn(startPos+2, numbers_small[number][2]);
+            }
             break;
         case BIG:
-            mx.setColumn(startPos, numbers_big[number][0]);
-            mx.setColumn(startPos+1, numbers_big[number][1]);
-            mx.setColumn(startPos+2, numbers_big[number][2]);
-            mx.setColumn(startPos+3, numbers_big[number][3]);
+            if (underscore)
+            {
+                mx.setColumn(startPos, numbers_big[number][0] | 0x80);
+                mx.setColumn(startPos+1, numbers_big[number][1] | 0x80);
+                mx.setColumn(startPos+2, numbers_big[number][2] | 0x80);
+                mx.setColumn(startPos+3, numbers_big[number][3] | 0x80);
+            }
+            else
+            {
+                mx.setColumn(startPos, numbers_big[number][0]);
+                mx.setColumn(startPos+1, numbers_big[number][1]);
+                mx.setColumn(startPos+2, numbers_big[number][2]);
+                mx.setColumn(startPos+3, numbers_big[number][3]);
+            }
+            
             break;
         default:
             break;
@@ -660,32 +700,47 @@ void printNumber(uint8_t startPos, uint8_t number, numberSize numSize)
 }
 
 /*
+ *      Print time
+ */
+void printTime(uint8_t hours, uint8_t minutes, uint8_t seconds)
+{
+    printHours(hours, false);
+    printMinutes(minutes, false);
+    printSeconds(seconds, false);
+}
+
+/*
  *      Print a number at the hours position
  */
-void printHours(uint8_t hours)
+void printHours(uint8_t hours, bool underscore)
 {
-    printNumber(HOURS_START_POS, (uint8_t) hours / 10, BIG);
-    printNumber(HOURS_START_POS + 5, (uint8_t) hours % 10, BIG);
+
+
+    printNumber(HOURS_START_POS, (uint8_t) hours / 10, BIG, underscore);
+    printNumber(HOURS_START_POS + 5, (uint8_t) hours % 10, BIG, underscore);
 }
 
 /*
  *      Print a number at the minutes position
  */
-void printMinutes(uint8_t minutes)
+void printMinutes(uint8_t minutes, bool underscore)
 {
-    printNumber(MINUTES_START_POS, (uint8_t) minutes / 10, BIG);
-    printNumber(MINUTES_START_POS + 5, (uint8_t) minutes % 10, BIG);
+    printNumber(MINUTES_START_POS, (uint8_t) minutes / 10, BIG, underscore);
+    printNumber(MINUTES_START_POS + 5, (uint8_t) minutes % 10, BIG, underscore);
 }
 
 /*
  *      Print a number at the seconds position
  */
-void printSeconds(uint8_t seconds)
+void printSeconds(uint8_t seconds, bool underscore)
 {
-    printNumber(SECONDS_START_POS, (uint8_t) seconds / 10, SMALL);
-    printNumber(SECONDS_START_POS + 4, (uint8_t) seconds % 10, SMALL);
+    printNumber(SECONDS_START_POS, (uint8_t) seconds / 10, SMALL, underscore);
+    printNumber(SECONDS_START_POS + 4, (uint8_t) seconds % 10, SMALL, underscore);
 }
 
+/*
+ *      Print a text to the matrix.
+ */
 void printText(const char *pMsg)
 {
     uint8_t cursor = 0;
