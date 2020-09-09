@@ -37,6 +37,7 @@
 #define DEBOUNCE_DELAY              50
 
 #define MENU_TIMEOUT                7
+#define ALARM_TIMEOUT               10
 
 #define HARDWARE_TYPE               MD_MAX72XX::PAROLA_HW
 
@@ -120,6 +121,10 @@ unsigned long confirmLastDebounceTime = 0;
 
 bool inMenu = false;
 uint8_t menuTimeout = 0;
+
+bool alarmTriggered = false;
+uint8_t alarmTimeout = 0;
+uint8_t alarmSecondCounter = 0;
 
 uint8_t intensity = MAX_INTENSITY/2;
 
@@ -580,6 +585,8 @@ void checkAlarm()
                 if (seconds == alarmSeconds && minutes == alarmMinutes && hours == alarmHours)
                 {
                     alarmCheckState = ALARM_TRIGGERED;
+                    alarmTriggered = true;
+                    mx.control(MD_MAX72XX::INTENSITY, MAX_INTENSITY);
                 }
             }
             break;
@@ -587,11 +594,15 @@ void checkAlarm()
         case ALARM_TRIGGERED:
             if (modeButtonClicked || confirmButtonClicked)
             {
+                alarmTimeout = 0;
+                alarmSecondCounter = 0;
                 modeButtonClicked = false;
                 confirmButtonClicked = false;
+                alarmTriggered = false;
                 alarmCheckState = CHECK;
                 noTone(BUZZER_PIN);
                 forceUpdate = true;
+                mx.control(MD_MAX72XX::INTENSITY, intensity);
                 return;
             }
             
@@ -666,6 +677,26 @@ ISR(TIMER1_OVF_vect)
         }
 
     }
+    if (alarmTriggered)
+    {
+        alarmSecondCounter++;
+        if (alarmSecondCounter == 60)
+        {
+            alarmSecondCounter = 0;
+            alarmTimeout++;
+            if (alarmTimeout == ALARM_TIMEOUT)
+            {
+                alarmTimeout = 0;
+                alarmSecondCounter = 0;
+                alarmTriggered = false;
+                alarmCheckState = CHECK;
+                noTone(BUZZER_PIN);
+                mx.control(MD_MAX72XX::INTENSITY, intensity);
+                forceUpdate = true;
+            }
+        }
+    }
+
 
     toggle = !toggle;
 }
