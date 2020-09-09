@@ -13,6 +13,7 @@
 #include <SPI.h>
 
 #include "numbers.h"
+#include "characters.h"
 
 /*
  *      Defines
@@ -35,6 +36,11 @@
 #define SECOND_CORRECTION_MINUTES   110
 #define DEBOUNCE_DELAY              50
 
+#define MENU_TIMEOUT                10
+
+#define HARDWARE_TYPE               MD_MAX72XX::PAROLA_HW
+
+#define BUF_SIZE                    75
 
 /*
  *      Enums
@@ -48,7 +54,8 @@ typedef enum {
     STANDBY = 0,
     UPDATE_CLOCK,
     MODE_SET_TIME,
-    MODE_SET_ALARM
+    MODE_SET_ALARM,
+    MODE_SET_INTENSITY
 } stateMachineState;
 
 typedef enum {
@@ -60,11 +67,21 @@ typedef enum {
     ACCEPT
 } stateMachineMode;
 
+typedef enum {
+    PRINT = 0,
+    SELECT,
+    SET_INTENSITY
+} stateIntensity;
+
 
 /*
  *      Global variables
  */
-MD_MAX72XX mx = MD_MAX72XX(MD_MAX72XX::PAROLA_HW, CS_PIN, MAX_DEVICES);
+MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+
+const char *timeText = "TIME";
+const char *alarmText = "ALARM";
+const char *intensityText="LIGHT";
 
 uint8_t seconds = 0;
 uint8_t minutes = 0;
@@ -96,12 +113,17 @@ bool confirmButtonClicked = false;
 unsigned long modeLastDebounceTime = 0;
 unsigned long confirmLastDebounceTime = 0;
 
+bool inMenu = false;
+uint8_t menuTimeout = 0;
+
+uint8_t intensity = MAX_INTENSITY/2;
+
 bool forceUpdate = false;
 
 static stateMachineState state = STANDBY;
-
 static stateMachineMode timeState = PRINT_MODE;
 static stateMachineMode alarmState = PRINT_MODE;
+static stateIntensity intensityState = PRINT;
 
 /*
  *      Setup function
@@ -119,6 +141,7 @@ void setup()
     printHours(hours);
     printMinutes(minutes);
     printSeconds(seconds);
+    Serial.begin(57600);
 }
 
 /*
@@ -137,7 +160,6 @@ void loop()
         noTone(BUZZER_PIN);
     }*/
 
-
     mainStateMachine();
 }
 
@@ -153,6 +175,7 @@ void mainStateMachine()
             if (modeButtonClicked == true)
             {
                 modeButtonClicked = false;
+                inMenu = true;
                 state = MODE_SET_TIME;
             }
             if (confirmButtonClicked == true)
@@ -207,8 +230,7 @@ void mainStateMachine()
             {
                 case PRINT_MODE:
                     mx.clear();
-                    mx.setColumn(0, 0xFF);
-                    // print "Set Time"
+                    printText(timeText);
                     timeState = SELECTION;
                     break;
 
@@ -218,14 +240,18 @@ void mainStateMachine()
                         modeButtonClicked = false;
                         timeState = PRINT_MODE;
                         state = MODE_SET_ALARM;
+                        menuTimeout = 0;
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
+                        inMenu = false;
+                        menuTimeout = 0;
                         timeState = SET_HOURS;
                         visualHours = hours;
                         visualMinutes = minutes;
                         visualSeconds = seconds;
+                        mx.clear();
                         printHours(visualHours);
                         printMinutes(visualMinutes);
                         printSeconds(visualSeconds);
@@ -283,7 +309,7 @@ void mainStateMachine()
                         forceUpdate = true;
                         hours = visualHours;
                         minutes = visualMinutes;
-                        hours = visualHours;
+                        seconds = visualSeconds;
                     }
                     break;
 
@@ -297,9 +323,7 @@ void mainStateMachine()
             {
                 case PRINT_MODE:
                     mx.clear();
-                    mx.setColumn(0, 0xFF);
-                    mx.setColumn(1, 0xFF);
-                    // print "Set Alarm"
+                    printText(alarmText);
                     alarmState = SELECTION;
                     break;
 
@@ -308,15 +332,19 @@ void mainStateMachine()
                     {
                         modeButtonClicked = false;
                         alarmState = PRINT_MODE;
-                        state = MODE_SET_TIME;
+                        state = MODE_SET_INTENSITY;
+                        menuTimeout = 0;
                     }
                     else if (confirmButtonClicked == true)
                     {
                         confirmButtonClicked = false;
+                        inMenu = false;
+                        menuTimeout = 0;
                         alarmState = SET_HOURS;
                         visualHours = hours;
                         visualMinutes = minutes;
                         visualSeconds = seconds;
+                        mx.clear();
                         printHours(visualHours);
                         printMinutes(visualMinutes);
                         printSeconds(visualSeconds);
@@ -374,7 +402,61 @@ void mainStateMachine()
                         forceUpdate = true;
                         alarmHours = visualHours;
                         alarmMinutes = visualMinutes;
-                        alarmHours = visualHours;
+                        alarmSeconds = visualSeconds;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+            break;
+
+        case MODE_SET_INTENSITY:
+            switch (intensityState)
+            {
+                case PRINT:
+                    mx.clear();
+                    printText(intensityText);
+                    intensityState = SELECT;
+                    break;
+
+                case SELECT:
+                    if (modeButtonClicked == true)
+                    {
+                        modeButtonClicked = false;
+                        intensityState = PRINT;
+                        state = STANDBY;
+                        forceUpdate = true;
+                        inMenu = false;
+                        menuTimeout = 0;
+                    }
+                    else if (confirmButtonClicked == true)
+                    {
+                        confirmButtonClicked = false;
+                        inMenu = false;
+                        menuTimeout = 0;
+                        intensityState = SET_INTENSITY;
+                        mx.clear();
+                        for (uint8_t i = 0; i < MATRIX_HEIGHT; i++)
+                        {
+                            mx.setRow(i, 0xFF);
+                        }
+                    }
+                    break;
+
+                case SET_INTENSITY:
+                    if (modeButtonClicked == true)
+                    {
+                        modeButtonClicked = false;
+                        intensity = (intensity + 1) % MAX_INTENSITY;
+                        mx.control(MD_MAX72XX::INTENSITY, intensity);
+                    }
+                    else if (confirmButtonClicked == true)
+                    {
+                        confirmButtonClicked = false;
+                        intensityState = PRINT;
+                        state = STANDBY;
+                        forceUpdate = true;
                     }
                     break;
 
@@ -440,6 +522,24 @@ void buttonHandler()
  */
 ISR(TIMER1_OVF_vect)
 {
+    if (inMenu)
+    {
+        Serial.println(menuTimeout);
+        if (menuTimeout == MENU_TIMEOUT)
+        {
+            menuTimeout = 0;
+            state = STANDBY;
+            timeState = PRINT_MODE;
+            alarmState = PRINT_MODE;
+            forceUpdate = true;
+            inMenu = false;
+        }
+        else
+        {
+            menuTimeout++;
+        }
+    }
+
     /* Update time */
     seconds = seconds + 1;
     if (seconds == 60)
@@ -528,4 +628,47 @@ void printSeconds(uint8_t seconds)
 {
     printNumber(SECONDS_START_POS, (uint8_t) seconds / 10, SMALL);
     printNumber(SECONDS_START_POS + 4, (uint8_t) seconds % 10, SMALL);
+}
+
+void printText(const char *pMsg)
+{
+    uint8_t cursor = 0;
+    uint8_t index;
+    uint8_t i, j;
+
+    for (i = 0; i < strlen(pMsg); i++)
+    {
+        if (pMsg[i] >= 0x20 && pMsg[i] <= 0x7E)
+        {
+            index = pMsg[i] - 0x20;
+
+            if (pMsg[i] == 0x20)
+            {
+                mx.setColumn(cursor++, characters[index][0]);
+                mx.setColumn(cursor++, characters[index][1]);
+                cursor++;
+                continue;
+            }
+            else if (pMsg[i] == 0x22)
+            {
+                mx.setColumn(cursor++, characters[index][0]);
+                mx.setColumn(cursor++, characters[index][1]);
+                mx.setColumn(cursor++, characters[index][2]);
+                cursor++;
+                continue;
+            }
+
+            for (j = 0; j < CHARACTER_WIDTH; j++)
+            {
+                if (characters[index][j] != 0x00)
+                {
+                    mx.setColumn(cursor++, characters[index][j]);
+                }
+            }
+            cursor++;
+        }
+        else
+        {
+        }
+    }
 }

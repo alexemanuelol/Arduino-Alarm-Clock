@@ -1,3 +1,12 @@
+#ifndef NUMBERS_H
+#define NUMBERSS_H
+
+#include <Arduino.h>
+
+#ifdef __cplusplus
+extern "C"{
+#endif
+
 #define NUMBERS             10
 #define NUMBER_BIG_WIDTH    4
 #define NUMBER_SMALL_WIDTH  3
@@ -29,3 +38,9 @@ const uint8_t numbers_small[NUMBERS][NUMBER_SMALL_WIDTH] =
     { 0x3E, 0x2A, 0x3E },
     { 0x2E, 0x2A, 0x3E },
 };
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
+#endif
