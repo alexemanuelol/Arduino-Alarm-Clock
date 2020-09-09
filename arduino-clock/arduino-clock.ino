@@ -73,6 +73,11 @@ typedef enum {
     SET_INTENSITY
 } stateIntensity;
 
+typedef enum {
+    CHECK = 0,
+    ALARM_TRIGGERED
+} stateAlarmState;
+
 
 /*
  *      Global variables
@@ -100,7 +105,6 @@ uint8_t alarmMinutes = 0;
 uint8_t alarmHours = 0;
 
 uint8_t minuteCounter = 0;
-bool alternateColon = 0;
 
 uint8_t modeButtonReading;
 uint8_t confirmButtonReading;
@@ -118,12 +122,17 @@ uint8_t menuTimeout = 0;
 
 uint8_t intensity = MAX_INTENSITY/2;
 
+bool alarmSet = false;
+
+bool toggle = false;
+
 bool forceUpdate = false;
 
 static stateMachineState state = STANDBY;
 static stateMachineMode timeState = PRINT_MODE;
 static stateMachineMode alarmState = PRINT_MODE;
 static stateIntensity intensityState = PRINT;
+static stateAlarmState alarmCheckState = CHECK;
 
 /*
  *      Setup function
@@ -135,13 +144,13 @@ void setup()
     pinMode(MODE_BUTTON_PIN, INPUT);
     pinMode(CONFIRM_BUTTON_PIN, INPUT);
     pinMode(BUZZER_PIN, OUTPUT);
+    noTone(BUZZER_PIN);
 
     mx.begin();
 
     printHours(hours);
     printMinutes(minutes);
     printSeconds(seconds);
-    Serial.begin(57600);
 }
 
 /*
@@ -150,16 +159,7 @@ void setup()
 void loop()
 {
     buttonHandler();
-
-    /*if (modeButtonState == HIGH)
-    {
-        tone(BUZZER_PIN, 500);
-    }
-    else
-    {
-        noTone(BUZZER_PIN);
-    }*/
-
+    checkAlarm();
     mainStateMachine();
 }
 
@@ -212,14 +212,12 @@ void mainStateMachine()
                 printHours(hours);
             }
 
-            if (alternateColon)
+            if (toggle)
             {
-                alternateColon = 0;
                 mx.setColumn(10, 0x14);
             }
             else
             {
-                alternateColon = 1;
                 mx.setColumn(10, 0x00);
             }
             forceUpdate = false;
@@ -403,6 +401,7 @@ void mainStateMachine()
                         alarmHours = visualHours;
                         alarmMinutes = visualMinutes;
                         alarmSeconds = visualSeconds;
+                        alarmSet = true;
                     }
                     break;
 
@@ -518,13 +517,61 @@ void buttonHandler()
 }
 
 /*
+ *      Check alarm function
+ */
+void checkAlarm()
+{
+    switch (alarmCheckState)
+    {
+        case CHECK:
+            if (alarmSet)
+            {
+                if (seconds == alarmSeconds && minutes == alarmMinutes && hours == alarmHours)
+                {
+                    alarmCheckState = ALARM_TRIGGERED;
+                }
+            }
+            break;
+
+        case ALARM_TRIGGERED:
+            if (modeButtonClicked || confirmButtonClicked)
+            {
+                modeButtonClicked = false;
+                confirmButtonClicked = false;
+                alarmCheckState = CHECK;
+                noTone(BUZZER_PIN);
+                forceUpdate = true;
+                return;
+            }
+            
+            if (toggle)
+            {
+                tone(BUZZER_PIN, 500);
+                for (uint8_t i = 0; i < MATRIX_HEIGHT; i++)
+                {
+                    mx.setRow(i, 0xFF);
+                }
+            }
+            else
+            {
+                noTone(BUZZER_PIN);
+                forceUpdate = true;
+            }
+            break;
+        
+        default:
+            break;
+    }
+
+}
+
+/*
  *      Interrupt Service Routine
  */
 ISR(TIMER1_OVF_vect)
 {
     if (inMenu)
     {
-        Serial.println(menuTimeout);
         if (menuTimeout == MENU_TIMEOUT)
         {
             menuTimeout = 0;
@@ -562,6 +609,7 @@ ISR(TIMER1_OVF_vect)
             }
         }
     }
+    toggle = !toggle;
 }
 
 /*
