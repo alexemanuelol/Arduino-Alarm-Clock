@@ -104,6 +104,7 @@ uint8_t alarmSeconds = 0;
 uint8_t alarmMinutes = 0;
 uint8_t alarmHours = 0;
 
+uint8_t secondCounter = 0;
 uint8_t minuteCounter = 0;
 
 uint8_t modeButtonReading;
@@ -588,17 +589,12 @@ ISR(TIMER1_OVF_vect)
     }
 
     /* Update time */
-    seconds = seconds + 1;
+    secondCounter++;
+    seconds++;
     if (seconds == 60)
     {
         seconds = 0;
         minutes = minutes + 1;
-        minuteCounter = minuteCounter + 1;
-        if (minuteCounter == SECOND_CORRECTION_MINUTES)
-        {
-            minuteCounter = 0;
-            seconds = seconds + 1;
-        }
         if (minutes == 60)
         {
             minutes = 0;
@@ -609,6 +605,18 @@ ISR(TIMER1_OVF_vect)
             }
         }
     }
+    if (secondCounter == 60)
+    {
+        secondCounter = 0;
+        minuteCounter++;
+        if (minuteCounter == SECOND_CORRECTION_MINUTES)
+        {
+            minuteCounter = 0;
+            seconds++;
+        }
+
+    }
+
     toggle = !toggle;
 }
 
