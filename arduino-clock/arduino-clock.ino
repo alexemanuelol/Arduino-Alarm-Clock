@@ -332,6 +332,13 @@ void mainStateMachine()
                         timeState = PRINT_MODE;
                         state = STANDBY;
                         forceUpdate = true;
+                    }
+                    else if (confirmButtonClicked == true)
+                    {
+                        confirmButtonClicked = false;
+                        timeState = PRINT_MODE;
+                        state = STANDBY;
+                        forceUpdate = true;
                         hours = visualHours;
                         minutes = visualMinutes;
                         seconds = visualSeconds;
@@ -432,6 +439,13 @@ void mainStateMachine()
                     if (modeButtonClicked == true)
                     {
                         modeButtonClicked = false;
+                        alarmState = PRINT_MODE;
+                        state = STANDBY;
+                        forceUpdate = true;
+                    }
+                    else if (confirmButtonClicked == true)
+                    {
+                        confirmButtonClicked = false;
                         alarmState = PRINT_MODE;
                         state = STANDBY;
                         forceUpdate = true;
