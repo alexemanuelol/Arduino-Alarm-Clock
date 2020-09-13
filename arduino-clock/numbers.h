@@ -11,7 +11,7 @@ extern "C"{
 #define NUMBER_BIG_WIDTH    4
 #define NUMBER_SMALL_WIDTH  3
 
-const uint8_t numbers_big[NUMBERS][NUMBER_BIG_WIDTH] = 
+const uint8_t numbersBig[NUMBERS][NUMBER_BIG_WIDTH] = 
 {
     { 0x7F, 0x41, 0x41, 0x7F },
     { 0x00, 0x42, 0x7F, 0x40 },
@@ -25,7 +25,7 @@ const uint8_t numbers_big[NUMBERS][NUMBER_BIG_WIDTH] =
     { 0x4F, 0x49, 0x49, 0x7F },
 };
 
-const uint8_t numbers_small[NUMBERS][NUMBER_SMALL_WIDTH] = 
+const uint8_t numbersSmall[NUMBERS][NUMBER_SMALL_WIDTH] = 
 {
     { 0x3E, 0x22, 0x3E },
     { 0x24, 0x3E, 0x20 },

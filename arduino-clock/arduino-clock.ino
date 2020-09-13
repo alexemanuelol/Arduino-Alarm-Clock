@@ -6,78 +6,110 @@
  *      Usage:
  */
 
+
 /*
  *      Includes
  */
 #include <MD_MAX72xx.h>
 #include <SPI.h>
 
-#include "numbers.h"
 #include "characters.h"
+#include "numbers.h"
+
 
 /*
  *      Defines
  */
-#define CLK_PIN                     13 /* SCK */
-#define DATA_PIN                    11 /* MOSI */
-#define CS_PIN                      10 /* SS */
+#define CLK_PIN                     13  /* SCK */
+#define DATA_PIN                    11  /* MOSI */
+#define CS_PIN                      10  /* SS */
 #define MODE_BUTTON_PIN             4
 #define CONFIRM_BUTTON_PIN          2
 #define BUZZER_PIN                  9
 
+#define HARDWARE_TYPE               MD_MAX72XX::PAROLA_HW
 #define MAX_DEVICES                 4
-#define MATRIX_WIDTH                (8 * MAX_DEVICES)
-#define MATRIX_HEIGHT               8
+#define DEVICE_WIDTH_HEIGHT         8
 
 #define HOURS_START_POS             0
 #define MINUTES_START_POS           12
 #define SECONDS_START_POS           24
 
+#define SECONDS_PER_MINUTE          60
+#define MINUTES_PER_HOUR            60
+#define HOURS_PER_DAY               24
+
 #define SECOND_CORRECTION_MINUTES   110
 #define DEBOUNCE_DELAY              50
 
-#define MENU_TIMEOUT                7
-#define ALARM_TIMEOUT               10
+#define MENU_TIMEOUT                7       /* Seconds */
+#define ALARM_TIMEOUT               10      /* Minutes */
 
-#define HARDWARE_TYPE               MD_MAX72XX::PAROLA_HW
-
-#define BUF_SIZE                    75
 
 /*
  *      Enums
  */
 typedef enum {
-    SMALL = 0,
-    BIG
-} numberSize;
+    BIG = 0,
+    SMALL
+} numberType;
 
 typedef enum {
     STANDBY = 0,
     UPDATE_CLOCK,
-    MODE_SET_TIME,
-    MODE_SET_ALARM,
-    MODE_SET_INTENSITY
-} stateMachineState;
-
-typedef enum {
-    PRINT_MODE = 0,
-    SELECTION,
-    SET_HOURS,
-    SET_MINUTES,
-    SET_SECONDS,
-    ACCEPT
-} stateMachineMode;
-
-typedef enum {
-    PRINT = 0,
-    SELECT,
+    SET_TIME,
+    SET_ALARM,
     SET_INTENSITY
-} stateIntensity;
+} stateMainEnum;
+
+typedef enum {
+    TIME_PRINT_TEXT = 0,
+    TIME_SELECTION,
+    TIME_SET_HOURS,
+    TIME_SET_MINUTES,
+    TIME_SET_SECONDS,
+    TIME_CONFIRMATION
+} stateSetTimeEnum;
+
+typedef enum {
+    ALARM_PRINT_TEXT = 0,
+    ALARM_SELECTION,
+    ALARM_ADD_PRINT_TEXT,
+    ALARM_ADD_SELECTION,
+    ALARM_REMOVE_PRINT_TEXT,
+    ALARM_REMOVE_SELECTION,
+    ALARM_CANCEL_PRINT_TEXT,
+    ALARM_CANCEL_SELECTION,
+    ALARM_CHOOSE_ALARM_ADD,
+    ALARM_CHOOSE_ALARM_REMOVE,
+    ALARM_REMOVE,
+    ALARM_SET_HOURS,
+    ALARM_SET_MINUTES,
+    ALARM_SET_SECONDS,
+    ALARM_CONFIRMATION
+} stateSetAlarmEnum;
+
+typedef enum {
+    INTENSITY_PRINT_TEXT = 0,
+    INTENSITY_SELECTION,
+    INTENSITY_SET
+} stateIntensityEnum;
 
 typedef enum {
     CHECK = 0,
     ALARM_TRIGGERED
-} stateAlarmState;
+} stateCheckAlarmEnum;
+
+
+/*
+ *      Structs
+ */
+struct Alarm {
+    bool active;
+    uint8_t seconds;
+    uint8_t minutes;
+    uint8_t hours;
+};
 
 
 /*
@@ -88,79 +120,108 @@ MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 const char *timeText = "TIME";
 const char *alarmText = "ALARM";
 const char *intensityText="LIGHT";
+const char *addText = "ADD";
+const char *removeText = "REMOVE";
+const char *cancelText = "CANCEL";
+
+bool timeUpdated = false;
+bool secondsUpdated = false;
+bool minutesUpdated = false;
+bool hoursUpdated = false;
 
 uint8_t seconds = 0;
 uint8_t minutes = 0;
 uint8_t hours = 0;
-
-uint8_t prevSeconds = 0;
-uint8_t prevMinutes = 0;
-uint8_t prevHours = 0;
-
 uint8_t visualSeconds = 0;
 uint8_t visualMinutes = 0;
 uint8_t visualHours = 0;
 
-uint8_t alarmSeconds = 0;
-uint8_t alarmMinutes = 0;
-uint8_t alarmHours = 0;
-
-uint8_t secondCounter = 0;
-uint8_t minuteCounter = 0;
-
-uint8_t modeButtonReading;
-uint8_t confirmButtonReading;
-uint8_t modeButtonState = 0;
-uint8_t prevModeButtonState = 0;
-uint8_t confirmButtonState = 0;
-uint8_t prevConfirmButtonState = 0;
-bool modeButtonClicked = false;
-bool confirmButtonClicked = false;
-unsigned long modeLastDebounceTime = 0;
-unsigned long confirmLastDebounceTime = 0;
+struct Alarm alarm1;
+struct Alarm alarm2;
+struct Alarm alarm3;
+static uint8_t selectedAlarm = 0;
 
 bool inMenu = false;
 uint8_t menuTimeout = 0;
-
+uint8_t alarmTimeoutSeconds = 0;
+uint8_t alarmTimeoutMinutes = 0;
 bool alarmTriggered = false;
-uint8_t alarmTimeout = 0;
-uint8_t alarmSecondCounter = 0;
 
-uint8_t intensity = MAX_INTENSITY/2;
+uint8_t modeButtonReading;
+uint8_t modeButtonState = 0;
+uint8_t prevModeButtonState = 0;
+unsigned long modeLastDebounceTime = 0;
+bool modeButtonClicked = false;
 
-bool alarmSet = false;
+uint8_t confirmButtonReading;
+uint8_t confirmButtonState = 0;
+uint8_t prevConfirmButtonState = 0;
+unsigned long confirmLastDebounceTime = 0;
+bool confirmButtonClicked = false;
 
 bool toggle = false;
-
+bool toggle2 = false;
 bool forceUpdate = false;
+uint8_t intensity = MAX_INTENSITY/2;
 
-static stateMachineState state = STANDBY;
-static stateMachineMode timeState = PRINT_MODE;
-static stateMachineMode alarmState = PRINT_MODE;
-static stateIntensity intensityState = PRINT;
-static stateAlarmState alarmCheckState = CHECK;
+static stateMainEnum mainState = STANDBY;
+static stateSetTimeEnum setTimeState = TIME_PRINT_TEXT;
+static stateSetAlarmEnum setAlarmState = ALARM_PRINT_TEXT;
+static stateIntensityEnum setIntensityState = INTENSITY_PRINT_TEXT;
+static stateCheckAlarmEnum alarmCheckState = CHECK;
+
 
 /*
- *      Setup function
+ *      Setup function.
  */
 void setup()
 {
     initInterrupt();
 
-    pinMode(MODE_BUTTON_PIN, INPUT);
-    pinMode(CONFIRM_BUTTON_PIN, INPUT);
-    pinMode(BUZZER_PIN, OUTPUT);
-    noTone(BUZZER_PIN);
+    pinMode( MODE_BUTTON_PIN, INPUT );
+    pinMode( CONFIRM_BUTTON_PIN, INPUT );
+    pinMode( BUZZER_PIN, OUTPUT );
+    noTone( BUZZER_PIN );
 
+    /* Start the matrix display module. */
     mx.begin();
 
-    printHours(hours, false);
-    printMinutes(minutes, false);
-    printSeconds(seconds, false);
+    /* Set initial time */
+    printHours( hours, false );
+    printMinutes( minutes, false );
+    printSeconds( seconds, false );
+
+    alarm1.active = false;
+    alarm1.seconds = 0;
+    alarm1.minutes = 0;
+    alarm1.hours = 0;
+
+    alarm2.active = false;
+    alarm2.seconds = 0;
+    alarm2.minutes = 0;
+    alarm2.hours = 0;
+
+    alarm3.active = false;
+    alarm3.seconds = 0;
+    alarm3.minutes = 0;
+    alarm3.hours = 0;
 }
 
 /*
- *      Interrupt initialization
+ *      Main loop function.
+ */
+void loop()
+{
+    buttonHandler();
+    updateTime();
+    checkMenuTimeout();
+    checkAlarmTimeout();
+    checkAlarm();
+    mainStateMachine();
+}
+
+/*
+ *      Interrupt initialization.
  */
 void initInterrupt()
 {
@@ -170,353 +231,207 @@ void initInterrupt()
     TCNT1 = 0x0000;     /* Preload timer */
     TCCR1A = 0xA2;      /* fast 16 bit PWM */
     TCCR1B = 0x1c;      /* 256 Prescaler */
-    ICR1 = 62500-1;
+    ICR1 = 62500 - 1;
     TIMSK1 |= 0x01;     /* Enable timer overflow interrupt */
     interrupts();       /* Enable all interrupts */
 }
 
 /*
- *      Main loop function
+ *      Interrupt Service Routine.
  */
-void loop()
+ISR( TIMER1_OVF_vect )
 {
-    buttonHandler();
-    checkAlarm();
-    mainStateMachine();
+    seconds++;
+    timeUpdated = true;
+
+    if ( inMenu )
+    {
+        menuTimeout++;
+    }
+    if ( alarmTriggered )
+    {
+        alarmTimeoutSeconds++;
+    }
+
+    toggle = !toggle;
+
+    // TODO fix correction
 }
 
 /*
- *      Main state machine function
+ *      Main state machine function.
  */
 void mainStateMachine()
 {
-    switch (state)
+    switch ( mainState )
     {
         case STANDBY:
             mx.update();
-            if (modeButtonClicked == true)
+            if ( isModeButtonClicked() )
             {
-                modeButtonClicked = false;
                 inMenu = true;
-                state = MODE_SET_TIME;
+                mainState = SET_TIME;
+                return;
             }
-            if (confirmButtonClicked == true)
+            if ( isConfirmButtonClicked() )
             {
-                confirmButtonClicked = false;
-                /* Nothing */
+                /* Do nothing */
             }
-            if ( ((seconds != prevSeconds) || (minutes != prevMinutes) || (hours != prevHours)) && state != MODE_SET_TIME )
+            if ( ( secondsUpdated || minutesUpdated || hoursUpdated || forceUpdate ) && !alarmTriggered )
             {
-                state = UPDATE_CLOCK;
+                mainState = UPDATE_CLOCK;
             }
             break;
 
         case UPDATE_CLOCK:
-            state = STANDBY;
-            if (forceUpdate)
+            mainState = STANDBY;
+            if ( forceUpdate )
             {
                 mx.clear();
             }
 
-            if (seconds != prevSeconds || forceUpdate)
+            if ( secondsUpdated || forceUpdate )
             {
-                prevSeconds = seconds;
-                printSeconds(seconds, false);
+                secondsUpdated = false;
+                printSeconds( seconds, false );
             }
-            if (minutes != prevMinutes || forceUpdate)
+            if ( minutesUpdated || forceUpdate )
             {
-                prevMinutes = minutes;
-                printMinutes(minutes, false);
+                minutesUpdated = false;
+                printMinutes( minutes, false );
             }
-            if (hours != prevHours || forceUpdate)
+            if ( hoursUpdated || forceUpdate )
             {
-                prevHours = hours;
-                printHours(hours, false);
+                hoursUpdated = false;
+                printHours( hours, false );
             }
 
-            if (toggle)
+            /* Toggle the time colon. */
+            if ( toggle )
             {
-                mx.setColumn(10, 0x14);
+                mx.setColumn( 10, 0x14 );
             }
             else
             {
-                mx.setColumn(10, 0x00);
+                mx.setColumn( 10, 0x00 );
             }
             forceUpdate = false;
             break;
         
-        case MODE_SET_TIME:
-            switch (timeState)
+        case SET_TIME:
+            setTimeStateMachine();
+            break;
+
+        case SET_ALARM:
+            setAlarmStateMachine();
+            break;
+
+        case SET_INTENSITY:
+            setIntensityStateMachine();
+            break;
+
+        default:
+            break;
+    }
+}
+
+/*
+ *      Set time state machine function.
+ */
+void setTimeStateMachine()
+{
+    switch ( setTimeState )
+    {
+        case TIME_PRINT_TEXT:
+            mx.clear();
+            printText( timeText );
+            setTimeState = TIME_SELECTION;
+            break;
+
+        case TIME_SELECTION:
+            if ( isModeButtonClicked() )
             {
-                case PRINT_MODE:
-                    mx.clear();
-                    printText(timeText);
-                    timeState = SELECTION;
-                    break;
-
-                case SELECTION:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        timeState = PRINT_MODE;
-                        state = MODE_SET_ALARM;
-                        menuTimeout = 0;
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        inMenu = false;
-                        menuTimeout = 0;
-                        timeState = SET_HOURS;
-                        visualHours = hours;
-                        visualMinutes = minutes;
-                        visualSeconds = seconds;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                        printHours(visualHours, true);
-                        mx.setColumn(4, 0x80);
-                    }
-                    break;
-
-                case SET_HOURS:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        visualHours = (visualHours + 1) % 24;
-                        printHours(visualHours, true);
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        timeState = SET_MINUTES;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                        printMinutes(visualMinutes, true);
-                        mx.setColumn(16, 0x80);
-                    }
-                    break;
-
-                case SET_MINUTES:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        visualMinutes = (visualMinutes + 1) % 60;
-                        printMinutes(visualMinutes, true);
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        timeState = SET_SECONDS;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                        printSeconds(visualSeconds, true);
-                        mx.setColumn(27, 0x40);
-                    }
-                    break;
-
-                case SET_SECONDS:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        visualSeconds = (visualSeconds + 1) % 60;
-                        printSeconds(visualSeconds, true);
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        timeState = ACCEPT;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                    }
-                    break;
-
-                case ACCEPT:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        timeState = PRINT_MODE;
-                        state = STANDBY;
-                        forceUpdate = true;
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        timeState = PRINT_MODE;
-                        state = STANDBY;
-                        forceUpdate = true;
-                        hours = visualHours;
-                        minutes = visualMinutes;
-                        seconds = visualSeconds;
-                    }
-                    break;
-
-                default:
-                    break;
+                setTimeState = TIME_PRINT_TEXT;
+                mainState = SET_ALARM;
+                menuTimeout = 0;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                inMenu = false;
+                menuTimeout = 0;
+                setTimeState = TIME_SET_HOURS;
+                visualHours = 0;
+                visualMinutes = 0;
+                visualSeconds = 0;
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                printHours( visualHours, true );
+                mx.setColumn( 4, 0x80 );
             }
             break;
 
-        case MODE_SET_ALARM:
-            switch (alarmState)
+        case TIME_SET_HOURS:
+            if ( isModeButtonClicked() )
             {
-                case PRINT_MODE:
-                    mx.clear();
-                    printText(alarmText);
-                    alarmState = SELECTION;
-                    break;
-
-                case SELECTION:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        alarmState = PRINT_MODE;
-                        state = MODE_SET_INTENSITY;
-                        menuTimeout = 0;
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        inMenu = false;
-                        menuTimeout = 0;
-                        alarmState = SET_HOURS;
-                        visualHours = hours;
-                        visualMinutes = minutes;
-                        visualSeconds = seconds;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                        printHours(visualHours, true);
-                        mx.setColumn(4, 0x80);
-                    }
-                    break;
-
-                case SET_HOURS:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        visualHours = (visualHours + 1) % 24;
-                        printHours(visualHours, true);
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        alarmState = SET_MINUTES;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                        printMinutes(visualMinutes, true);
-                        mx.setColumn(16, 0x80);
-                    }
-                    break;
-
-                case SET_MINUTES:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        visualMinutes = (visualMinutes + 1) % 60;
-                        printMinutes(visualMinutes, true);
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        alarmState = SET_SECONDS;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                        printSeconds(visualSeconds, true);
-                        mx.setColumn(27, 0x40);
-                    }
-                    break;
-
-                case SET_SECONDS:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        visualSeconds = (visualSeconds + 1) % 60;
-                        printSeconds(visualSeconds, true);
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        alarmState = ACCEPT;
-                        mx.clear();
-                        printTime(visualHours, visualMinutes, visualSeconds);
-                    }
-                    break;
-
-                case ACCEPT:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        alarmState = PRINT_MODE;
-                        state = STANDBY;
-                        forceUpdate = true;
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        alarmState = PRINT_MODE;
-                        state = STANDBY;
-                        forceUpdate = true;
-                        alarmHours = visualHours;
-                        alarmMinutes = visualMinutes;
-                        alarmSeconds = visualSeconds;
-                        alarmSet = true;
-                    }
-                    break;
-
-                default:
-                    break;
+                visualHours = ( visualHours + 1 ) % 24;
+                printHours( visualHours, true );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setTimeState = TIME_SET_MINUTES;
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                printMinutes( visualMinutes, true );
+                mx.setColumn( 16, 0x80 );
             }
             break;
 
-        case MODE_SET_INTENSITY:
-            switch (intensityState)
+        case TIME_SET_MINUTES:
+            if ( isModeButtonClicked() )
             {
-                case PRINT:
-                    mx.clear();
-                    printText(intensityText);
-                    intensityState = SELECT;
-                    break;
+                visualMinutes = ( visualMinutes + 1 ) % 60;
+                printMinutes( visualMinutes, true );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setTimeState = TIME_SET_SECONDS;
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                printSeconds( visualSeconds, true );
+                mx.setColumn( 27, 0x40 );
+            }
+            break;
 
-                case SELECT:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        intensityState = PRINT;
-                        state = STANDBY;
-                        forceUpdate = true;
-                        inMenu = false;
-                        menuTimeout = 0;
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        inMenu = false;
-                        menuTimeout = 0;
-                        intensityState = SET_INTENSITY;
-                        mx.clear();
-                        for (uint8_t i = 0; i < MATRIX_HEIGHT; i++)
-                        {
-                            mx.setRow(i, 0xFF);
-                        }
-                    }
-                    break;
+        case TIME_SET_SECONDS:
+            if ( isModeButtonClicked() )
+            {
+                visualSeconds = ( visualSeconds + 1 ) % 60;
+                printSeconds( visualSeconds, true );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setTimeState = TIME_CONFIRMATION;
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                mx.setRow( 7, 0xFF );
+            }
+            break;
 
-                case SET_INTENSITY:
-                    if (modeButtonClicked == true)
-                    {
-                        modeButtonClicked = false;
-                        intensity = (intensity + 1) % MAX_INTENSITY;
-                        mx.control(MD_MAX72XX::INTENSITY, intensity);
-                    }
-                    else if (confirmButtonClicked == true)
-                    {
-                        confirmButtonClicked = false;
-                        intensityState = PRINT;
-                        state = STANDBY;
-                        forceUpdate = true;
-                    }
-                    break;
-
-                default:
-                    break;
+        case TIME_CONFIRMATION:
+            if ( isModeButtonClicked() )
+            {
+                setTimeState = TIME_PRINT_TEXT;
+                mainState = STANDBY;
+                forceUpdate = true;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setTimeState = TIME_PRINT_TEXT;
+                mainState = STANDBY;
+                forceUpdate = true;
+                hours = visualHours;
+                minutes = visualMinutes;
+                seconds = visualSeconds;
             }
             break;
 
@@ -526,42 +441,510 @@ void mainStateMachine()
 }
 
 /*
- *      Button handler
+ *      Set alarm state machine function.
+ */
+void setAlarmStateMachine()
+{
+    switch ( setAlarmState )
+    {
+        case ALARM_PRINT_TEXT:
+            mx.clear();
+            printText( alarmText );
+            setAlarmState = ALARM_SELECTION;
+            break;
+
+        case ALARM_SELECTION:
+            if ( isModeButtonClicked() )
+            {
+                setAlarmState = ALARM_PRINT_TEXT;
+                mainState = SET_INTENSITY;
+                menuTimeout = 0;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_ADD_PRINT_TEXT;
+                menuTimeout = 0;
+            }
+            break;
+
+        case ALARM_ADD_PRINT_TEXT:
+            mx.clear();
+            printText( addText );
+            setAlarmState = ALARM_ADD_SELECTION;
+            break;
+
+        case ALARM_ADD_SELECTION:
+            if ( isModeButtonClicked() )
+            {
+                setAlarmState = ALARM_REMOVE_PRINT_TEXT;
+                menuTimeout = 0;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_CHOOSE_ALARM_ADD;
+                menuTimeout = 0;
+                mx.clear();
+                printAlarmSelection( selectedAlarm );
+            }
+            break;
+
+        case ALARM_REMOVE_PRINT_TEXT:
+            mx.clear();
+            printText( removeText );
+            setAlarmState = ALARM_REMOVE_SELECTION;
+            break;
+
+        case ALARM_REMOVE_SELECTION:
+            if ( isModeButtonClicked() )
+            {
+                setAlarmState = ALARM_CANCEL_PRINT_TEXT;
+                menuTimeout = 0;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_CHOOSE_ALARM_REMOVE;
+                menuTimeout = 0;
+                mx.clear();
+                printAlarmSelection( selectedAlarm );
+            }
+            break;
+
+        case ALARM_CANCEL_PRINT_TEXT:
+            mx.clear();
+            printText( cancelText );
+            setAlarmState = ALARM_CANCEL_SELECTION;
+            break;
+
+        case ALARM_CANCEL_SELECTION:
+            if ( isModeButtonClicked() )
+            {
+                setAlarmState = ALARM_ADD_PRINT_TEXT;
+                menuTimeout = 0;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                inMenu = false;
+                menuTimeout = 0;
+                setAlarmState = ALARM_PRINT_TEXT;
+                mainState = STANDBY;
+                forceUpdate = true;
+            }
+            break;
+
+        case ALARM_CHOOSE_ALARM_ADD:
+            if ( isModeButtonClicked() )
+            {
+                menuTimeout = 0;
+                selectedAlarm = ( selectedAlarm + 1 ) % 3;
+
+                mx.clear();
+                printAlarmSelection( selectedAlarm );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_SET_HOURS;
+                inMenu = false;
+                menuTimeout = 0;
+                if ( selectedAlarm == 0 )
+                {
+                    visualHours = alarm1.hours;
+                    visualMinutes = alarm1.minutes;
+                    visualSeconds = alarm1.seconds;
+                }
+                else if ( selectedAlarm == 1 )
+                {
+                    visualHours = alarm2.hours;
+                    visualMinutes = alarm2.minutes;
+                    visualSeconds = alarm2.seconds;
+                }
+                else if ( selectedAlarm == 2 )
+                {
+                    visualHours = alarm3.hours;
+                    visualMinutes = alarm3.minutes;
+                    visualSeconds = alarm3.seconds;
+                }
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                printHours( visualHours, true );
+                mx.setColumn( 4, 0x80 );
+            }
+            break;
+
+        case ALARM_CHOOSE_ALARM_REMOVE:
+            if ( isModeButtonClicked() )
+            {
+                menuTimeout = 0;
+                selectedAlarm = ( selectedAlarm + 1 ) % 3;
+
+                mx.clear();
+                printAlarmSelection( selectedAlarm );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_REMOVE;
+            }
+            break;
+
+        case ALARM_REMOVE:
+            if ( selectedAlarm == 0 )
+            {
+                alarm1.active = false;
+                alarm1.seconds = 0;
+                alarm1.minutes = 0;
+                alarm1.hours = 0;
+            }
+            else if ( selectedAlarm == 1 )
+            {
+                alarm2.active = false;
+                alarm2.seconds = 0;
+                alarm2.minutes = 0;
+                alarm2.hours = 0;
+            }
+            else if ( selectedAlarm == 2 )
+            {
+                alarm3.active = false;
+                alarm3.seconds = 0;
+                alarm3.minutes = 0;
+                alarm3.hours = 0;
+            }
+            selectedAlarm = 0;
+            inMenu = false;
+            menuTimeout = 0;
+            setAlarmState = ALARM_PRINT_TEXT;
+            mainState = STANDBY;
+            forceUpdate = true;
+            break;
+
+        case ALARM_SET_HOURS:
+            if ( isModeButtonClicked() )
+            {
+                visualHours = ( visualHours + 1 ) % 24;
+                printHours( visualHours, true );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_SET_MINUTES;
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                printMinutes( visualMinutes, true );
+                mx.setColumn( 16, 0x80 );
+            }
+            break;
+
+        case ALARM_SET_MINUTES:
+            if ( isModeButtonClicked() )
+            {
+                visualMinutes = ( visualMinutes + 1 ) % 60;
+                printMinutes( visualMinutes, true );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_SET_SECONDS;
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                printSeconds( visualSeconds, true );
+                mx.setColumn( 27, 0x40 );
+            }
+            break;
+
+        case ALARM_SET_SECONDS:
+            if ( isModeButtonClicked() )
+            {
+                visualSeconds = ( visualSeconds + 1 ) % 60;
+                printSeconds( visualSeconds, true );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setAlarmState = ALARM_CONFIRMATION;
+                mx.clear();
+                printTime( visualHours, visualMinutes, visualSeconds );
+                mx.setRow( 7, 0xFF );
+            }
+            break;
+
+        case ALARM_CONFIRMATION:
+            if ( isModeButtonClicked() )
+            {
+                setAlarmState = ALARM_PRINT_TEXT;
+                mainState = STANDBY;
+                forceUpdate = true;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                if ( selectedAlarm == 0 )
+                {
+                    alarm1.active = true;
+                    alarm1.seconds = visualSeconds;
+                    alarm1.minutes = visualMinutes;
+                    alarm1.hours = visualHours;
+                }
+                else if ( selectedAlarm == 1 )
+                {
+                    alarm2.active = true;
+                    alarm2.seconds = visualSeconds;
+                    alarm2.minutes = visualMinutes;
+                    alarm2.hours = visualHours;
+                }
+                else if ( selectedAlarm == 2 )
+                {
+                    alarm3.active = true;
+                    alarm3.seconds = visualSeconds;
+                    alarm3.minutes = visualMinutes;
+                    alarm3.hours = visualHours;
+                }
+                selectedAlarm = 0;
+                setAlarmState = ALARM_PRINT_TEXT;
+                mainState = STANDBY;
+                forceUpdate = true;
+            }
+            break;
+
+        default:
+            break;
+    }
+
+}
+
+/*
+ *      Set intensity state machine function.
+ */
+void setIntensityStateMachine()
+{
+    switch ( setIntensityState )
+    {
+        case INTENSITY_PRINT_TEXT:
+            mx.clear();
+            printText( intensityText );
+            setIntensityState = INTENSITY_SELECTION;
+            break;
+
+        case INTENSITY_SELECTION:
+            if ( isModeButtonClicked() )
+            {
+                setIntensityState = INTENSITY_PRINT_TEXT;
+                mainState = STANDBY;
+                forceUpdate = true;
+                inMenu = false;
+                menuTimeout = 0;
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                inMenu = false;
+                menuTimeout = 0;
+                setIntensityState = INTENSITY_SET;
+                mx.clear();
+                for ( uint8_t i = 0; i < DEVICE_WIDTH_HEIGHT; i++ )
+                {
+                    mx.setRow( i, 0xFF );
+                }
+            }
+            break;
+
+        case INTENSITY_SET:
+            if ( isModeButtonClicked() )
+            {
+                intensity = ( intensity + 1 ) % MAX_INTENSITY;
+                mx.control( MD_MAX72XX::INTENSITY, intensity );
+            }
+            else if ( isConfirmButtonClicked() )
+            {
+                setIntensityState = INTENSITY_PRINT_TEXT;
+                mainState = STANDBY;
+                forceUpdate = true;
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+/*
+ *      Check alarm function.
+ */
+void checkAlarm()
+{
+    switch ( alarmCheckState )
+    {
+        case CHECK:
+            if ( alarm1.active )
+            {
+                if ( seconds == alarm1.seconds && minutes == alarm1.minutes && hours == alarm1.hours )
+                {
+                    alarmCheckState = ALARM_TRIGGERED;
+                    alarmTriggered = true;
+                    mx.control( MD_MAX72XX::INTENSITY, MAX_INTENSITY );
+                }
+            }
+            if ( alarm2.active )
+            {
+                if ( seconds == alarm2.seconds && minutes == alarm2.minutes && hours == alarm2.hours )
+                {
+                    alarmCheckState = ALARM_TRIGGERED;
+                    alarmTriggered = true;
+                    mx.control( MD_MAX72XX::INTENSITY, MAX_INTENSITY );
+                }
+            }
+            if ( alarm3.active )
+            {
+                if ( seconds == alarm3.seconds && minutes == alarm3.minutes && hours == alarm3.hours )
+                {
+                    alarmCheckState = ALARM_TRIGGERED;
+                    alarmTriggered = true;
+                    mx.control( MD_MAX72XX::INTENSITY, MAX_INTENSITY );
+                }
+            }
+            break;
+
+        case ALARM_TRIGGERED:
+            if ( modeButtonClicked || confirmButtonClicked || !alarmTriggered )
+            {
+                alarmTimeoutMinutes = 0;
+                alarmTimeoutSeconds = 0;
+                modeButtonClicked = false;
+                confirmButtonClicked = false;
+                alarmTriggered = false;
+                alarmCheckState = CHECK;
+                noTone( BUZZER_PIN );
+                forceUpdate = true;
+                mx.control( MD_MAX72XX::INTENSITY, intensity );
+                return;
+            }
+            
+            if ( toggle )
+            {
+                if ( toggle != toggle2 )
+                {
+                    tone( BUZZER_PIN, 500 );
+                    for ( uint8_t i = 0; i < DEVICE_WIDTH_HEIGHT; i++ )
+                    {
+                        mx.setRow( i, 0xFF );
+                    }
+                    toggle2 = toggle;
+                }
+            }
+            else
+            {
+                if ( toggle != toggle2 )
+                {
+                    noTone( BUZZER_PIN );
+                    mx.clear();
+                    printTime( hours, minutes, seconds );
+                    toggle2 = toggle;
+                }
+            }
+            break;
+        
+        default:
+            break;
+    }
+}
+
+/*
+ *      Check the menu timeout.
+ */
+void checkMenuTimeout()
+{
+    if ( inMenu )
+    {
+        if ( menuTimeout == MENU_TIMEOUT )
+        {
+            inMenu = false;
+            menuTimeout = 0;
+            mainState = STANDBY;
+            setTimeState = TIME_PRINT_TEXT;
+            setAlarmState = ALARM_PRINT_TEXT;
+            selectedAlarm = 0;
+            forceUpdate = true;
+        }
+    }
+}
+
+/*
+ *      Check the alarm timeout
+ */
+void checkAlarmTimeout()
+{
+    if ( alarmTriggered )
+    {
+        if ( alarmTimeoutSeconds == SECONDS_PER_MINUTE )
+        {
+            alarmTimeoutSeconds = 0;
+            alarmTimeoutMinutes++;
+            if ( alarmTimeoutMinutes == ALARM_TIMEOUT )
+            {
+                alarmTriggered = false;
+            }
+        }
+    }
+}
+
+/*
+ *      Update the time variables.
+ */
+void updateTime()
+{
+    /* Check if time has been updated. */
+    if ( timeUpdated )
+    {
+        timeUpdated = false;
+        if ( seconds == SECONDS_PER_MINUTE )
+        {
+            seconds = 0;
+            minutes++;
+            if ( minutes == MINUTES_PER_HOUR )
+            {
+                minutes = 0;
+                hours++;
+                if ( hours == HOURS_PER_DAY )
+                {
+                    hours = 0;
+                }
+                hoursUpdated = true;
+            }
+            minutesUpdated = true;
+        }
+        secondsUpdated = true;
+    }
+}
+
+/*
+ *      Button handler.
  */
 void buttonHandler()
 {
-    modeButtonReading = digitalRead(MODE_BUTTON_PIN);
-    confirmButtonReading = digitalRead(CONFIRM_BUTTON_PIN);
+    modeButtonReading = digitalRead( MODE_BUTTON_PIN );
+    confirmButtonReading = digitalRead( CONFIRM_BUTTON_PIN );
 
-    if (modeButtonReading != prevModeButtonState)
+    if ( modeButtonReading != prevModeButtonState )
     {
         modeLastDebounceTime = millis();
     }
-    if (confirmButtonReading != prevConfirmButtonState)
+    if ( confirmButtonReading != prevConfirmButtonState )
     {
         confirmLastDebounceTime = millis();
     }
 
-    if ( (millis() - modeLastDebounceTime) > DEBOUNCE_DELAY )
+    if ( ( millis() - modeLastDebounceTime ) > DEBOUNCE_DELAY )
     {
-        if (modeButtonReading != modeButtonState)
+        if ( modeButtonReading != modeButtonState )
         {
             modeButtonState = modeButtonReading;
 
-            if (modeButtonState == HIGH)
+            if ( modeButtonState == HIGH )
             {
                 modeButtonClicked = true;
             }
         }
     }
 
-    if ( (millis() - confirmLastDebounceTime) > DEBOUNCE_DELAY )
+    if ( ( millis() - confirmLastDebounceTime ) > DEBOUNCE_DELAY )
     {
-        if (confirmButtonReading != confirmButtonState)
+        if ( confirmButtonReading != confirmButtonState )
         {
             confirmButtonState = confirmButtonReading;
 
-            if (confirmButtonState == HIGH)
+            if ( confirmButtonState == HIGH )
             {
                 confirmButtonClicked = true;
             }
@@ -573,258 +956,178 @@ void buttonHandler()
 }
 
 /*
- *      Check alarm function
+ *      Returns true if the button has been clicked.
  */
-void checkAlarm()
+bool isModeButtonClicked()
 {
-    switch (alarmCheckState)
+    if ( modeButtonClicked == true )
     {
-        case CHECK:
-            if (alarmSet)
-            {
-                if (seconds == alarmSeconds && minutes == alarmMinutes && hours == alarmHours)
-                {
-                    alarmCheckState = ALARM_TRIGGERED;
-                    alarmTriggered = true;
-                    mx.control(MD_MAX72XX::INTENSITY, MAX_INTENSITY);
-                }
-            }
-            break;
+        modeButtonClicked = false;
+        return true;
+    }
+    return false;
+}
 
-        case ALARM_TRIGGERED:
-            if (modeButtonClicked || confirmButtonClicked)
-            {
-                alarmTimeout = 0;
-                alarmSecondCounter = 0;
-                modeButtonClicked = false;
-                confirmButtonClicked = false;
-                alarmTriggered = false;
-                alarmCheckState = CHECK;
-                noTone(BUZZER_PIN);
-                forceUpdate = true;
-                mx.control(MD_MAX72XX::INTENSITY, intensity);
-                return;
-            }
-            
-            if (toggle)
-            {
-                tone(BUZZER_PIN, 500);
-                for (uint8_t i = 0; i < MATRIX_HEIGHT; i++)
-                {
-                    mx.setRow(i, 0xFF);
-                }
-            }
-            else
-            {
-                noTone(BUZZER_PIN);
-                forceUpdate = true;
-            }
+/*
+ *      Returns true if the button has been clicked.
+ */
+bool isConfirmButtonClicked()
+{
+    if ( confirmButtonClicked == true )
+    {
+        confirmButtonClicked = false;
+        return true;
+    }
+    return false;
+}
+
+/*
+ *      Print a number at the hours position on the matrix display.
+ */
+void printHours( uint8_t hours, bool underscore )
+{
+    printNumber( hours / 10, HOURS_START_POS, BIG, underscore );
+    printNumber( hours % 10, HOURS_START_POS + 5, BIG, underscore );
+}
+
+/*
+ *      Print a number at the minutes position on the matrix display.
+ */
+void printMinutes( uint8_t minutes, bool underscore )
+{
+    printNumber( minutes / 10, MINUTES_START_POS, BIG, underscore );
+    printNumber( minutes % 10, MINUTES_START_POS + 5, BIG, underscore );
+}
+
+/*
+ *      Print a number at the seconds position on the matrix display.
+ */
+void printSeconds( uint8_t seconds, bool underscore )
+{
+    printNumber( seconds / 10, SECONDS_START_POS, SMALL, underscore );
+    printNumber( seconds % 10, SECONDS_START_POS + 4, SMALL, underscore );
+}
+
+/*
+ *      Print time to the matrix display.
+ */
+void printTime( uint8_t hours, uint8_t minutes, uint8_t seconds )
+{
+    printHours( hours, false );
+    printMinutes( minutes, false );
+    printSeconds( seconds, false );
+}
+
+/*
+ *      Print alarm selection display.
+ */
+void printAlarmSelection( uint8_t highlight )
+{
+    switch ( highlight )
+    {
+        case 0:
+            printNumber( 1, 5, BIG, true );
+            printNumber( 2, 14, BIG, false );
+            printNumber( 3, 23, BIG, false );
             break;
-        
+        case 1:
+            printNumber( 1, 5, BIG, false );
+            printNumber( 2, 14, BIG, true );
+            printNumber( 3, 23, BIG, false );
+            break;
+        case 2:
+            printNumber( 1, 5, BIG, false );
+            printNumber( 2, 14, BIG, false );
+            printNumber( 3, 23, BIG, true );
+            break;
         default:
             break;
     }
-
 }
 
 /*
- *      Interrupt Service Routine
+ *      Print a number on the matrix display.
  */
-ISR(TIMER1_OVF_vect)
+void printNumber( uint8_t number, uint8_t position, numberType numberType, bool underscore )
 {
-    if (inMenu)
+    switch ( numberType )
     {
-        if (menuTimeout == MENU_TIMEOUT)
-        {
-            menuTimeout = 0;
-            state = STANDBY;
-            timeState = PRINT_MODE;
-            alarmState = PRINT_MODE;
-            forceUpdate = true;
-            inMenu = false;
-        }
-        else
-        {
-            menuTimeout++;
-        }
-    }
-
-    /* Update time */
-    secondCounter++;
-    seconds++;
-    if (seconds == 60)
-    {
-        seconds = 0;
-        minutes = minutes + 1;
-        if (minutes == 60)
-        {
-            minutes = 0;
-            hours = hours + 1;
-            if (hours == 24)
-            {
-                hours = 0;
-            }
-        }
-    }
-    if (secondCounter == 60)
-    {
-        secondCounter = 0;
-        minuteCounter++;
-        if (minuteCounter == SECOND_CORRECTION_MINUTES)
-        {
-            minuteCounter = 0;
-            seconds++;
-        }
-
-    }
-    if (alarmTriggered)
-    {
-        alarmSecondCounter++;
-        if (alarmSecondCounter == 60)
-        {
-            alarmSecondCounter = 0;
-            alarmTimeout++;
-            if (alarmTimeout == ALARM_TIMEOUT)
-            {
-                alarmTimeout = 0;
-                alarmSecondCounter = 0;
-                alarmTriggered = false;
-                alarmCheckState = CHECK;
-                noTone(BUZZER_PIN);
-                mx.control(MD_MAX72XX::INTENSITY, intensity);
-                forceUpdate = true;
-            }
-        }
-    }
-
-
-    toggle = !toggle;
-}
-
-/*
- *      Print a number on the display
- */
-void printNumber(uint8_t startPos, uint8_t number, numberSize numSize, bool underscore)
-{
-    switch (numSize)
-    {
-        case SMALL:
-            if (underscore)
-            {
-                mx.setColumn(startPos, numbers_small[number][0] | 0x40);
-                mx.setColumn(startPos+1, numbers_small[number][1] | 0x40);
-                mx.setColumn(startPos+2, numbers_small[number][2] | 0x40);
-            }
-            else
-            {
-                mx.setColumn(startPos, numbers_small[number][0]);
-                mx.setColumn(startPos+1, numbers_small[number][1]);
-                mx.setColumn(startPos+2, numbers_small[number][2]);
-            }
-            break;
         case BIG:
-            if (underscore)
+            if ( underscore )
             {
-                mx.setColumn(startPos, numbers_big[number][0] | 0x80);
-                mx.setColumn(startPos+1, numbers_big[number][1] | 0x80);
-                mx.setColumn(startPos+2, numbers_big[number][2] | 0x80);
-                mx.setColumn(startPos+3, numbers_big[number][3] | 0x80);
+                mx.setColumn( position, numbersBig[ number ][ 0 ] | 0x80 );
+                mx.setColumn( position + 1, numbersBig[ number ][ 1 ] | 0x80 );
+                mx.setColumn( position + 2, numbersBig[ number ][ 2 ] | 0x80 );
+                mx.setColumn( position + 3, numbersBig[ number ][ 3 ] | 0x80 );
             }
             else
             {
-                mx.setColumn(startPos, numbers_big[number][0]);
-                mx.setColumn(startPos+1, numbers_big[number][1]);
-                mx.setColumn(startPos+2, numbers_big[number][2]);
-                mx.setColumn(startPos+3, numbers_big[number][3]);
+                mx.setColumn( position, numbersBig[ number ][ 0 ] );
+                mx.setColumn( position + 1, numbersBig[ number ][ 1 ] );
+                mx.setColumn( position + 2, numbersBig[ number ][ 2 ] );
+                mx.setColumn( position + 3, numbersBig[ number ][ 3 ] );
             }
-            
             break;
+
+        case SMALL:
+            if ( underscore )
+            {
+                mx.setColumn( position, numbersSmall[ number ][ 0 ] | 0x40 );
+                mx.setColumn( position + 1, numbersSmall[ number ][ 1 ] | 0x40 );
+                mx.setColumn( position + 2, numbersSmall[ number ][ 2 ] | 0x40 );
+            }
+            else
+            {
+                mx.setColumn( position, numbersSmall[ number ][ 0 ] );
+                mx.setColumn( position + 1, numbersSmall[ number ][ 1 ] );
+                mx.setColumn( position + 2, numbersSmall[ number ][ 2 ] );
+            }
+            break;
+
         default:
             break;
     }
 }
 
 /*
- *      Print time
+ *      Print a text on the matrix display.
  */
-void printTime(uint8_t hours, uint8_t minutes, uint8_t seconds)
+void printText( const char *pMsg )
 {
-    printHours(hours, false);
-    printMinutes(minutes, false);
-    printSeconds(seconds, false);
-}
-
-/*
- *      Print a number at the hours position
- */
-void printHours(uint8_t hours, bool underscore)
-{
-
-
-    printNumber(HOURS_START_POS, (uint8_t) hours / 10, BIG, underscore);
-    printNumber(HOURS_START_POS + 5, (uint8_t) hours % 10, BIG, underscore);
-}
-
-/*
- *      Print a number at the minutes position
- */
-void printMinutes(uint8_t minutes, bool underscore)
-{
-    printNumber(MINUTES_START_POS, (uint8_t) minutes / 10, BIG, underscore);
-    printNumber(MINUTES_START_POS + 5, (uint8_t) minutes % 10, BIG, underscore);
-}
-
-/*
- *      Print a number at the seconds position
- */
-void printSeconds(uint8_t seconds, bool underscore)
-{
-    printNumber(SECONDS_START_POS, (uint8_t) seconds / 10, SMALL, underscore);
-    printNumber(SECONDS_START_POS + 4, (uint8_t) seconds % 10, SMALL, underscore);
-}
-
-/*
- *      Print a text to the matrix.
- */
-void printText(const char *pMsg)
-{
+    mx.clear();
     uint8_t cursor = 0;
     uint8_t index;
-    uint8_t i, j;
 
-    for (i = 0; i < strlen(pMsg); i++)
+    for ( uint8_t i = 0; i < strlen( pMsg ); i++ )
     {
-        if (pMsg[i] >= 0x20 && pMsg[i] <= 0x7E)
+        if ( pMsg[ i ] >= 0x20 && pMsg[ i ] <= 0x7E )
         {
-            index = pMsg[i] - 0x20;
+            index = pMsg[ i ] - 0x20;
 
-            if (pMsg[i] == 0x20)
+            if ( pMsg[ i ] == 0x20 )      /* SPACE */
             {
-                mx.setColumn(cursor++, characters[index][0]);
-                mx.setColumn(cursor++, characters[index][1]);
+                mx.setColumn( cursor++, characters[ index ][ 0 ] );
+                mx.setColumn( cursor++, characters[ index ][ 1 ] );
                 cursor++;
                 continue;
             }
-            else if (pMsg[i] == 0x22)
+            else if ( pMsg[ i ] == 0x22 ) /* " */
             {
-                mx.setColumn(cursor++, characters[index][0]);
-                mx.setColumn(cursor++, characters[index][1]);
-                mx.setColumn(cursor++, characters[index][2]);
+                mx.setColumn( cursor++, characters[index][0] );
+                mx.setColumn( cursor++, characters[index][1] );
+                mx.setColumn( cursor++, characters[index][2] );
                 cursor++;
                 continue;
             }
 
-            for (j = 0; j < CHARACTER_WIDTH; j++)
+            for ( uint8_t j = 0; j < CHARACTER_WIDTH; j++ )
             {
-                if (characters[index][j] != 0x00)
+                if ( characters[ index ][ j ]  != 0x00 )
                 {
-                    mx.setColumn(cursor++, characters[index][j]);
+                    mx.setColumn( cursor++, characters[ index ][ j ] );
                 }
             }
             cursor++;
-        }
-        else
-        {
         }
     }
 }
