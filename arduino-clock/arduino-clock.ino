@@ -1,9 +1,7 @@
 /*
  *      Author:     Alexander Emanuelsson
  *
- *      Brief:
- *
- *      Usage:
+ *      Brief:      A simple alarm clock made with an arduino.
  */
 
 
@@ -44,6 +42,8 @@
 
 #define MENU_TIMEOUT                7       /* Seconds */
 #define ALARM_TIMEOUT               10      /* Minutes */
+#define CORRECTION_SECONDS          40
+#define CORRECTION_MINUTES          25
 
 
 /*
@@ -146,6 +146,8 @@ uint8_t menuTimeout = 0;
 uint8_t alarmTimeoutSeconds = 0;
 uint8_t alarmTimeoutMinutes = 0;
 bool alarmTriggered = false;
+uint8_t correctionSeconds = 0;
+uint8_t correctionMinutes = 0;
 
 uint8_t modeButtonReading;
 uint8_t modeButtonState = 0;
@@ -214,6 +216,8 @@ void loop()
 {
     buttonHandler();
     updateTime();
+    updateCorrectionTime();
+    checkCorrection();
     checkMenuTimeout();
     checkAlarmTimeout();
     checkAlarm();
@@ -242,6 +246,7 @@ void initInterrupt()
 ISR( TIMER1_OVF_vect )
 {
     seconds++;
+    correctionSeconds++;
     timeUpdated = true;
 
     if ( inMenu )
@@ -254,8 +259,6 @@ ISR( TIMER1_OVF_vect )
     }
 
     toggle = !toggle;
-
-    // TODO fix correction
 }
 
 /*
@@ -373,7 +376,7 @@ void setTimeStateMachine()
         case TIME_SET_HOURS:
             if ( isModeButtonClicked() )
             {
-                visualHours = ( visualHours + 1 ) % 24;
+                visualHours = ( visualHours + 1 ) % HOURS_PER_DAY;
                 printHours( visualHours, true );
             }
             else if ( isConfirmButtonClicked() )
@@ -389,7 +392,7 @@ void setTimeStateMachine()
         case TIME_SET_MINUTES:
             if ( isModeButtonClicked() )
             {
-                visualMinutes = ( visualMinutes + 1 ) % 60;
+                visualMinutes = ( visualMinutes + 1 ) % MINUTES_PER_HOUR;
                 printMinutes( visualMinutes, true );
             }
             else if ( isConfirmButtonClicked() )
@@ -405,7 +408,7 @@ void setTimeStateMachine()
         case TIME_SET_SECONDS:
             if ( isModeButtonClicked() )
             {
-                visualSeconds = ( visualSeconds + 1 ) % 60;
+                visualSeconds = ( visualSeconds + 1 ) % SECONDS_PER_MINUTE;
                 printSeconds( visualSeconds, true );
             }
             else if ( isConfirmButtonClicked() )
@@ -618,7 +621,7 @@ void setAlarmStateMachine()
         case ALARM_SET_HOURS:
             if ( isModeButtonClicked() )
             {
-                visualHours = ( visualHours + 1 ) % 24;
+                visualHours = ( visualHours + 1 ) % HOURS_PER_DAY;
                 printHours( visualHours, true );
             }
             else if ( isConfirmButtonClicked() )
@@ -634,7 +637,7 @@ void setAlarmStateMachine()
         case ALARM_SET_MINUTES:
             if ( isModeButtonClicked() )
             {
-                visualMinutes = ( visualMinutes + 1 ) % 60;
+                visualMinutes = ( visualMinutes + 1 ) % MINUTES_PER_HOUR;
                 printMinutes( visualMinutes, true );
             }
             else if ( isConfirmButtonClicked() )
@@ -650,7 +653,7 @@ void setAlarmStateMachine()
         case ALARM_SET_SECONDS:
             if ( isModeButtonClicked() )
             {
-                visualSeconds = ( visualSeconds + 1 ) % 60;
+                visualSeconds = ( visualSeconds + 1 ) % SECONDS_PER_MINUTE;
                 printSeconds( visualSeconds, true );
             }
             else if ( isConfirmButtonClicked() )
@@ -876,6 +879,33 @@ void checkAlarmTimeout()
                 alarmTriggered = false;
             }
         }
+    }
+}
+
+/*
+ *      Check the correction time.
+ */
+void checkCorrection()
+{
+    if ( correctionSeconds == CORRECTION_SECONDS && correctionMinutes == CORRECTION_MINUTES )
+    {
+        correctionSeconds = 0;
+        correctionMinutes = 0;
+        timeUpdated = true;
+        seconds++;
+        updateTime();
+    }
+}
+
+/*
+ *      Update the correction time variables.
+ */
+void updateCorrectionTime()
+{
+    if ( correctionSeconds == SECONDS_PER_MINUTE )
+    {
+        correctionSeconds = 0;
+        correctionMinutes++;
     }
 }
 
