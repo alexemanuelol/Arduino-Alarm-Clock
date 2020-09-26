@@ -42,8 +42,8 @@
 
 #define MENU_TIMEOUT                7       /* Seconds */
 #define ALARM_TIMEOUT               10      /* Minutes */
-#define CORRECTION_SECONDS          40
-#define CORRECTION_MINUTES          25
+#define CORRECTION_SECONDS          30
+#define CORRECTION_MINUTES          28
 
 
 /*
